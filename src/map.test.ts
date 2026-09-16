@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asNodeId } from "./domain";
-import { generateMap, reachableFrom } from "./map";
+import { generateMap, mapWiringOk, reachableFrom } from "./map";
 import { createRng } from "./rng";
 
 describe("generateMap", () => {
@@ -32,6 +32,16 @@ describe("generateMap", () => {
           .map((node) => node.kind);
         expect(new Set(kinds).size).toBe(kinds.length);
       }
+    }
+  });
+
+  it("gives every entrance an exit, every other room an entry and an exit, and every path the boss", () => {
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const map = generateMap(createRng(seed));
+      expect(mapWiringOk(map)).toBe(true);
+      const lastFloor = Math.max(...map.nodes.map((node) => node.floor));
+      const exits = map.nodes.filter((node) => node.floor === lastFloor - 1);
+      expect(exits.every((node) => node.next.includes(map.boss))).toBe(true);
     }
   });
 

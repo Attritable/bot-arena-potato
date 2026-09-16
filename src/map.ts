@@ -12,7 +12,7 @@ const FLOOR_SIZES = [0, 3, 4, 4, 3, 3, 1] as const;
 
 const LINKS: readonly (readonly (readonly number[])[])[] = [
   [],
-  [[0, 1], [1, 2], [2]],
+  [[0, 1], [1, 2], [2, 3]],
   [[0, 1], [1, 2], [2, 3], [3]],
   [[0], [0, 1], [1, 2], [2]],
   [[0, 1], [1], [1, 2]],
@@ -83,11 +83,15 @@ export function generateMap(rng: () => number): MapGraph {
     throw new Error("map anchors missing");
   }
 
-  return {
+  const map = {
     nodes,
     entrance: first.map((node) => node.id),
     boss: last[0].id,
   };
+  if (!mapWiringOk(map)) {
+    throw new Error("map wiring missing an entry or an exit");
+  }
+  return map;
 }
 
 export function nodeById(map: MapGraph, id: ReturnType<typeof asNodeId>): MapNode {
@@ -96,6 +100,50 @@ export function nodeById(map: MapGraph, id: ReturnType<typeof asNodeId>): MapNod
     throw new Error(`unknown node ${id}`);
   }
   return node;
+}
+
+export function mapWiringOk(map: MapGraph): boolean {
+  const incoming = new Map<MapNode["id"], number>();
+  for (const node of map.nodes) {
+    incoming.set(node.id, 0);
+  }
+  for (const node of map.nodes) {
+    for (const id of node.next) {
+      incoming.set(id, (incoming.get(id) ?? 0) + 1);
+    }
+  }
+  const lastFloor = Math.max(...map.nodes.map((node) => node.floor));
+  const exits = map.nodes.filter((node) => node.floor === lastFloor - 1);
+  if (exits.length === 0) {
+    return false;
+  }
+  if (!exits.every((node) => node.next.includes(map.boss))) {
+    return false;
+  }
+  for (const node of map.nodes) {
+    const inn = incoming.get(node.id) ?? 0;
+    if (node.id === map.boss) {
+      if (node.next.length !== 0 || inn < 1) {
+        return false;
+      }
+      continue;
+    }
+    if (map.entrance.includes(node.id)) {
+      if (node.next.length < 1) {
+        return false;
+      }
+      continue;
+    }
+    if (inn < 1 || node.next.length < 1) {
+      return false;
+    }
+  }
+  if (reachableFrom(map, map.entrance).size !== map.nodes.length) {
+    return false;
+  }
+  return map.nodes.every(
+    (node) => node.id === map.boss || reachableFrom(map, [node.id]).has(map.boss),
+  );
 }
 
 export function reachableFrom(map: MapGraph, start: MapNode["id"][]): Set<MapNode["id"]> {

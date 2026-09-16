@@ -29,7 +29,7 @@ GitHub Pages is not wired. The build uses a relative `base`, so you can drop `di
 
 1. Choose a run. Patrol is free. Raid, Haul, and Glass cost gold. Each act has its own team weight cap. A win pays gold. A loss takes gold. A win also gives a chassis or a part upgrade that stays for the next act.
 2. Kit on the map. Starters start on the bots. The bag stays empty until a reward, shop part, or act prize lands there. Drag a part onto a slot, or onto the bag to unequip. Chassis sets how much plate and tool weight that bot can carry. A heavier chassis carries more and weighs more itself.
-3. Pick a room. Lines are the links. Left rooms want a light party (`≤` gate). Right rooms want a heavy party (`≥` gate). Open rooms take any weight. A room you cannot reach from your last pick stays dark. A room whose gate you miss stays disabled until you re-kit.
+3. Pick a room. Lines are the links. Every entrance leads to at least one room. Every other room has an entry and an exit. The last layer all lead to the single boss. Left rooms want a light party (`≤` gate). Right rooms want a heavy party (`≥` gate). Open rooms take any weight. A room you cannot reach from your last pick stays dark. A room whose gate you miss stays disabled until you re-kit.
 4. On a fight, resolve. Combat runs without micro. The log shows HP, damage, and heal.
 5. Take a part and gold, then return to the map. The boss ends the act.
 
