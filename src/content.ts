@@ -6,6 +6,8 @@ import {
   type Part,
   type PartId,
   type Role,
+  type RunKind,
+  type RunKindId,
 } from "./domain";
 
 export const PARTS: readonly Part[] = [
@@ -210,6 +212,63 @@ const BOSS_ENEMY: Enemy = {
   hp: BALANCE.bossHp,
   atk: BALANCE.bossAtk,
 };
+
+export const RUN_KINDS: readonly RunKind[] = [
+  {
+    id: "patrol",
+    name: "Patrol",
+    blurb: "Free starter act. Team weight cap 32. Win pays 6 gold. Loss is free. Prize is one part upgrade.",
+    weightLimit: 32,
+    entryCost: 0,
+    winGold: 6,
+    loseGold: 0,
+    prize: "upgrade",
+  },
+  {
+    id: "raid",
+    name: "Raid",
+    blurb: "Pay 6 gold. Cap 44. Win pays 12. Loss costs 4. Prize is a chassis.",
+    weightLimit: 44,
+    entryCost: 6,
+    winGold: 12,
+    loseGold: 4,
+    prize: "chassis",
+  },
+  {
+    id: "haul",
+    name: "Haul",
+    blurb: "Pay 10 gold. Cap 60. Win pays 18. Loss costs 8. Prize is a chassis.",
+    weightLimit: 60,
+    entryCost: 10,
+    winGold: 18,
+    loseGold: 8,
+    prize: "chassis",
+  },
+  {
+    id: "glass",
+    name: "Glass",
+    blurb: "Pay 8 gold. Cap 28. Win pays 16. Loss costs 6. Prize is one part upgrade.",
+    weightLimit: 28,
+    entryCost: 8,
+    winGold: 16,
+    loseGold: 6,
+    prize: "upgrade",
+  },
+];
+
+const RUN_BY_ID = new Map(RUN_KINDS.map((kind) => [kind.id, kind]));
+
+export function runKindById(id: RunKindId): RunKind {
+  const kind = RUN_BY_ID.get(id);
+  if (!kind) {
+    throw new Error(`unknown run ${id}`);
+  }
+  return kind;
+}
+
+export function chassisParts(): Part[] {
+  return PARTS.filter((part) => part.kind === "chassis");
+}
 
 export function enemyFor(kind: NodeKind, roll: number): Enemy {
   if (kind === "elite") {

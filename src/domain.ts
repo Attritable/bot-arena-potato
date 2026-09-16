@@ -118,8 +118,22 @@ export type CombatReport = {
   enemyHpEnd: number;
 };
 
+export type RunKindId = "patrol" | "raid" | "haul" | "glass";
+
+export type RunKind = {
+  id: RunKindId;
+  name: string;
+  blurb: string;
+  weightLimit: number;
+  entryCost: number;
+  winGold: number;
+  loseGold: number;
+  prize: "chassis" | "upgrade";
+};
+
 export type Screen =
   | { kind: "title" }
+  | { kind: "selectRun" }
   | { kind: "map" }
   | { kind: "kit" }
   | { kind: "loadout"; nodeId: NodeId }
@@ -127,7 +141,9 @@ export type Screen =
   | { kind: "reward"; cash: number; offers: [PartId, PartId, PartId] }
   | { kind: "rest" }
   | { kind: "shop"; stock: Part[] }
-  | { kind: "end"; outcome: "win" | "lose" };
+  | { kind: "runPrize"; prize: "chassis"; offers: [PartId, PartId] }
+  | { kind: "runPrize"; prize: "upgrade" }
+  | { kind: "end"; outcome: "win" | "lose"; goldDelta: number };
 
 export type Run = {
   seed: number;
@@ -135,6 +151,8 @@ export type Run = {
   hp: number;
   maxHp: number;
   cash: number;
+  weightLimit: number;
+  runKind: RunKindId | null;
   bag: PartInstance[];
   bots: Bot[];
   nextInstance: number;
@@ -146,6 +164,7 @@ export type Run = {
 
 export type Command =
   | { kind: "start" }
+  | { kind: "pickRun"; runKindId: RunKindId }
   | { kind: "pickNode"; nodeId: NodeId }
   | { kind: "openKit" }
   | { kind: "closeKit" }
@@ -159,6 +178,8 @@ export type Command =
   | { kind: "restUpgrade"; instanceId: InstanceId }
   | { kind: "buy"; partId: PartId }
   | { kind: "leaveShop" }
+  | { kind: "takePrizePart"; partId: PartId }
+  | { kind: "takePrizeUpgrade"; instanceId: InstanceId }
   | { kind: "restart" };
 
 export const ROLES: readonly Role[] = [

@@ -184,25 +184,96 @@ export function toolFitsBot(part: Part, role: Role): boolean {
   return part.kind !== "tool" || part.role === role;
 }
 
+export function wornSlot(
+  run: Run,
+  instanceId: PartInstance["instanceId"],
+): { botId: Bot["id"]; slot: Slot } | null {
+  for (const bot of run.bots) {
+    if (bot.chassis === instanceId) {
+      return { botId: bot.id, slot: "chassis" };
+    }
+    if (bot.plate === instanceId) {
+      return { botId: bot.id, slot: "plate" };
+    }
+    if (bot.tool === instanceId) {
+      return { botId: bot.id, slot: "tool" };
+    }
+  }
+  return null;
+}
+
+export function detachInstance(run: Run, instanceId: PartInstance["instanceId"]): Run {
+  return {
+    ...run,
+    bots: run.bots.map((bot) => {
+      if (bot.chassis === instanceId) {
+        return { ...bot, chassis: null, plate: null, tool: null };
+      }
+      if (bot.plate === instanceId) {
+        return { ...bot, plate: null };
+      }
+      if (bot.tool === instanceId) {
+        return { ...bot, tool: null };
+      }
+      return bot;
+    }),
+  };
+}
+
 export function canEquip(run: Run, bot: Bot, instance: PartInstance): boolean {
   const part = effectivePart(partById(instance.partId), instance.plus);
   if (!toolFitsBot(part, bot.role)) {
     return false;
   }
-  const worn = equippedInstanceIds(run);
-  if (worn.has(instance.instanceId) && bot[slotOfPart(part)] !== instance.instanceId) {
-    return false;
-  }
-  const kit = botKit(run, bot);
+  const next = detachInstance(run, instance.instanceId);
+  const target = botById(next, bot.id);
+  const kit = botKit(next, target);
   if (part.kind === "chassis") {
-    return kit.carry <= part.capacity;
-  }
-  if (!kit.chassis) {
+    if (kit.carry > part.capacity) {
+      return false;
+    }
+  } else if (!kit.chassis) {
     return false;
+  } else {
+    const other =
+      part.kind === "plate" ? (kit.tool?.weight ?? 0) : (kit.plate?.weight ?? 0);
+    if (other + part.weight > kit.capacity) {
+      return false;
+    }
   }
-  const other =
-    part.kind === "plate" ? (kit.tool?.weight ?? 0) : (kit.plate?.weight ?? 0);
-  return other + part.weight <= kit.capacity;
+  const previewBots = next.bots.map((item) =>
+    item.id === target.id ? { ...item, [slotOfPart(part)]: instance.instanceId } : item,
+  );
+  return partyWeight({ ...next, bots: previewBots }) <= next.weightLimit;
+}
+
+export function effectExplain(effect: ToolEffect): string[] {
+  if (effect.family === "suppress") {
+    const lines = [`Cuts enemy attack by ${effect.amount}.`];
+    if (effect.stun) {
+      lines.push("Stun: the first hit this fight deals 0.");
+    }
+    return lines;
+  }
+  if (effect.family === "brace") {
+    const lines = [`Adds ${effect.armor} armor.`];
+    if (effect.guard) {
+      lines.push(`Guard: soak the first ${effect.guard} damage this fight.`);
+    }
+    return lines;
+  }
+  if (effect.family === "strike") {
+    const lines = [`Adds ${effect.atk} attack.`];
+    if (effect.burst) {
+      lines.push(`Burst: +${effect.burst} damage on round 1 only.`);
+    }
+    return lines;
+  }
+  const lines = [`Heals ${effect.heal} each round both sides still stand.`];
+  if (effect.rally) {
+    lines.push(`Rally: +${effect.rally} party attack.`);
+  }
+  return lines;
 }
 
 export function botLabel(bots: Bot[], bot: Bot): string {

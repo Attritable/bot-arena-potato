@@ -4,10 +4,15 @@ import { botKit, canEquip, partyWeight, spareBag, teamStats } from "./loadout";
 import { reachableFrom } from "./map";
 import { applyCommand, availableNodes, openNodes, startRun } from "./run";
 
+function enterPatrol(seed: number) {
+  let run = applyCommand(startRun(seed), { kind: "start" });
+  return applyCommand(run, { kind: "pickRun", runKindId: "patrol" });
+}
+
 describe("applyCommand", () => {
-  it("starts a run with five layered bots under chassis capacity", () => {
+  it("starts a campaign with five layered bots and an empty spare bag", () => {
     const run = applyCommand(startRun(11), { kind: "start" });
-    expect(run.screen.kind).toBe("map");
+    expect(run.screen.kind).toBe("selectRun");
     expect(run.bots).toHaveLength(5);
     expect(run.bots.map((bot) => bot.role)).toEqual([
       "defender",
@@ -26,12 +31,23 @@ describe("applyCommand", () => {
       expect(kit.tool?.role).toBe(bot.role);
       expect(kit.carry).toBeLessThanOrEqual(kit.capacity);
     }
-    expect(availableNodes(run)).toEqual(run.map.entrance);
-    expect(openNodes(run)).toEqual(run.map.entrance);
+  });
+
+  it("lets Patrol start for free and charges Raid", () => {
+    let run = applyCommand(startRun(2), { kind: "start" });
+    expect(run.cash).toBe(8);
+    const broke = applyCommand({ ...run, cash: 0 }, { kind: "pickRun", runKindId: "raid" });
+    expect(broke.screen.kind).toBe("selectRun");
+    expect(broke.cash).toBe(0);
+    run = applyCommand(run, { kind: "pickRun", runKindId: "raid" });
+    expect(run.screen.kind).toBe("map");
+    expect(run.cash).toBe(2);
+    expect(run.weightLimit).toBe(44);
+    expect(run.runKind).toBe("raid");
   });
 
   it("rejects a plate that would exceed the bot's chassis capacity", () => {
-    let run = applyCommand(startRun(3), { kind: "start" });
+    let run = enterPatrol(3);
     const heavy = asInstanceId("heavy");
     run = {
       ...run,
@@ -53,7 +69,7 @@ describe("applyCommand", () => {
   });
 
   it("rejects a tool on the wrong role", () => {
-    let run = applyCommand(startRun(3), { kind: "start" });
+    let run = enterPatrol(3);
     const lens = run.bag.find((item) => item.partId === asPartId("focus-lens"));
     expect(lens).toBeTruthy();
     run = { ...run, screen: { kind: "kit" } };
@@ -68,7 +84,7 @@ describe("applyCommand", () => {
   });
 
   it("blocks a node when party weight misses the gate", () => {
-    let run = applyCommand(startRun(4), { kind: "start" });
+    let run = enterPatrol(4);
     run = {
       ...run,
       bots: run.bots.map((bot) => ({ ...bot, chassis: null, plate: null, tool: null })),
@@ -81,15 +97,15 @@ describe("applyCommand", () => {
   });
 
   it("heals at rest and returns to the map", () => {
-    let run = applyCommand(startRun(4), { kind: "start" });
+    let run = enterPatrol(4);
     run = { ...run, hp: 6, screen: { kind: "rest" } };
     run = applyCommand(run, { kind: "restHeal" });
     expect(run.hp).toBe(14);
     expect(run.screen.kind).toBe("map");
   });
 
-  it("buys a shop part when cash covers the cost", () => {
-    let run = applyCommand(startRun(5), { kind: "start" });
+  it("buys a shop part when gold covers the cost", () => {
+    let run = enterPatrol(5);
     const part = {
       id: asPartId("burst-rail"),
       kind: "tool" as const,
@@ -110,7 +126,7 @@ describe("applyCommand", () => {
   });
 
   it("walks a full act on a lockout path with the starter 5-bot kit", () => {
-    let run = applyCommand(startRun(9), { kind: "start" });
+    let run = enterPatrol(9);
     expect(run.bots).toHaveLength(5);
     for (const bot of run.bots) {
       const kit = botKit(run, bot);
@@ -121,7 +137,7 @@ describe("applyCommand", () => {
     expect(reachableFrom(run.map, [left]).has(locked)).toBe(false);
 
     const seen = new Set<string>();
-    for (let step = 0; step < 50 && run.screen.kind !== "end"; step += 1) {
+    for (let step = 0; step < 50 && run.screen.kind !== "end" && run.screen.kind !== "runPrize"; step += 1) {
       if (run.screen.kind === "map") {
         for (const id of availableNodes(run)) {
           seen.add(id);
@@ -163,14 +179,17 @@ describe("applyCommand", () => {
       }
     }
     expect(seen.has(locked)).toBe(false);
-    expect(run.screen.kind).toBe("end");
+    expect(["end", "runPrize"]).toContain(run.screen.kind);
     if (run.screen.kind === "end") {
       expect(["win", "lose"]).toContain(run.screen.outcome);
+    }
+    if (run.screen.kind === "runPrize") {
+      expect(run.screen.prize).toBe("upgrade");
     }
   });
 
   it("resolves the opening fight and can reach a reward or an end", () => {
-    let run = applyCommand(startRun(2), { kind: "start" });
+    let run = enterPatrol(2);
     const nodeId = openNodes(run)[0]!;
     run = applyCommand(run, { kind: "pickNode", nodeId });
     expect(run.screen.kind).toBe("loadout");
@@ -181,6 +200,55 @@ describe("applyCommand", () => {
     }
     expect(run.screen.report.rounds[0]?.taken).toBeGreaterThanOrEqual(0);
     run = applyCommand(run, { kind: "continueAfterCombat" });
-    expect(["reward", "end"]).toContain(run.screen.kind);
+    expect(["reward", "end", "runPrize"]).toContain(run.screen.kind);
+  });
+
+  it("keeps the kit after a loss and subtracts the act's gold loss", () => {
+    let run = enterPatrol(8);
+    const bagSize = run.bag.length;
+    run = {
+      ...run,
+      runKind: "raid",
+      cash: 10,
+      screen: { kind: "combat", nodeId: run.map.boss, report: {
+        won: false,
+        enemyName: "Dummy",
+        rounds: [],
+        playerHpEnd: 0,
+        enemyHpEnd: 4,
+      } },
+    };
+    run = applyCommand(run, { kind: "continueAfterCombat" });
+    expect(run.screen.kind).toBe("end");
+    expect(run.cash).toBe(6);
+    expect(run.bag).toHaveLength(bagSize);
+    run = applyCommand(run, { kind: "restart" });
+    expect(run.screen.kind).toBe("selectRun");
+    expect(run.bag).toHaveLength(bagSize);
+  });
+
+  it("pays win gold and offers the Patrol upgrade prize", () => {
+    let run = enterPatrol(8);
+    run = {
+      ...run,
+      cash: 10,
+      screen: { kind: "combat", nodeId: run.map.boss, report: {
+        won: true,
+        enemyName: "Core Warden",
+        rounds: [],
+        playerHpEnd: 8,
+        enemyHpEnd: 0,
+      } },
+    };
+    run = applyCommand(run, { kind: "continueAfterCombat" });
+    expect(run.cash).toBe(16);
+    expect(run.screen.kind).toBe("runPrize");
+    if (run.screen.kind !== "runPrize" || run.screen.prize !== "upgrade") {
+      throw new Error("expected upgrade prize");
+    }
+    const first = run.bag[0]!;
+    run = applyCommand(run, { kind: "takePrizeUpgrade", instanceId: first.instanceId });
+    expect(run.screen.kind).toBe("selectRun");
+    expect(run.bag[0]?.plus).toBe(1);
   });
 });

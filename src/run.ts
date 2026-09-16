@@ -1,9 +1,11 @@
 import { BALANCE } from "./balance";
 import { resolveCombat } from "./combat";
 import {
+  chassisParts,
   enemyFor,
   PARTS,
   partById,
+  runKindById,
   STARTER_CHASSIS,
   STARTER_PLATE,
   STARTER_TOOL,
@@ -17,12 +19,14 @@ import {
   type NodeId,
   type PartId,
   type Run,
+  type RunKindId,
   type Slot,
 } from "./domain";
 import {
   botById,
   botKit,
   canEquip,
+  detachInstance,
   meetsGate,
   partyWeight,
   slotOfPart,
@@ -60,6 +64,8 @@ export function startRun(seed: number): Run {
     hp: BALANCE.startHp,
     maxHp: BALANCE.startHp,
     cash: BALANCE.startCash,
+    weightLimit: 32,
+    runKind: null,
     bag,
     bots,
     nextInstance,
@@ -73,9 +79,11 @@ export function startRun(seed: number): Run {
 export function applyCommand(run: Run, command: Command): Run {
   switch (command.kind) {
     case "start":
-      return run.screen.kind === "title" ? { ...run, screen: { kind: "map" } } : run;
+      return run.screen.kind === "title" ? { ...run, screen: { kind: "selectRun" } } : run;
+    case "pickRun":
+      return pickRun(run, command.runKindId);
     case "restart":
-      return startRun(run.seed + 1);
+      return continueCampaign(run);
     case "pickNode":
       return pickNode(run, command.nodeId);
     case "openKit":
@@ -102,6 +110,10 @@ export function applyCommand(run: Run, command: Command): Run {
       return buy(run, command.partId);
     case "leaveShop":
       return run.screen.kind === "shop" ? { ...run, screen: { kind: "map" } } : run;
+    case "takePrizePart":
+      return takePrizePart(run, command.partId);
+    case "takePrizeUpgrade":
+      return takePrizeUpgrade(run, command.instanceId);
     default: {
       const _exhaustive: never = command;
       return _exhaustive;
@@ -121,6 +133,36 @@ export function openNodes(run: Run): NodeId[] {
   return availableNodes(run).filter((id) =>
     meetsGate(weight, nodeById(run.map, id).gate),
   );
+}
+
+function pickRun(run: Run, runKindId: RunKindId): Run {
+  if (run.screen.kind !== "selectRun") {
+    return run;
+  }
+  const kind = runKindById(runKindId);
+  if (run.cash < kind.entryCost) {
+    return run;
+  }
+  return {
+    ...run,
+    seed: run.seed + 1,
+    rolls: 0,
+    hp: BALANCE.startHp,
+    cash: run.cash - kind.entryCost,
+    weightLimit: kind.weightLimit,
+    runKind: kind.id,
+    map: generateMap(createRng(run.seed + 1)),
+    current: null,
+    visited: [],
+    screen: { kind: "map" },
+  };
+}
+
+function continueCampaign(run: Run): Run {
+  if (run.screen.kind !== "end") {
+    return run;
+  }
+  return { ...run, screen: { kind: "selectRun" } };
 }
 
 function pickNode(run: Run, nodeId: NodeId): Run {
@@ -171,9 +213,10 @@ function equip(
   if (!canEquip(run, bot, instance)) {
     return run;
   }
+  const detached = detachInstance(run, instance.instanceId);
   return {
-    ...run,
-    bots: run.bots.map((item) =>
+    ...detached,
+    bots: detached.bots.map((item) =>
       item.id === botId ? { ...item, [slot]: instance.instanceId } : item,
     ),
   };
@@ -202,6 +245,9 @@ function commitFight(run: Run): Run {
     return run;
   }
   if (run.bots.some((bot) => botKit(run, bot).carry > botKit(run, bot).capacity)) {
+    return run;
+  }
+  if (partyWeight(run) > run.weightLimit) {
     return run;
   }
   const node = nodeById(run.map, run.screen.nodeId);
@@ -233,10 +279,10 @@ function continueAfterCombat(run: Run): Run {
   }
   const node = nodeById(run.map, run.screen.nodeId);
   if (!run.screen.report.won) {
-    return { ...run, screen: { kind: "end", outcome: "lose" } };
+    return settleAct(run, "lose");
   }
   if (node.kind === "boss") {
-    return { ...run, screen: { kind: "end", outcome: "win" } };
+    return settleAct(run, "win");
   }
   const cash = node.kind === "elite" ? BALANCE.eliteCash : BALANCE.fightCash;
   const rolled = withRng(run);
@@ -253,6 +299,55 @@ function continueAfterCombat(run: Run): Run {
       offers: [offers[0]!, offers[1]!, offers[2]!],
     },
   };
+}
+
+function settleAct(run: Run, outcome: "win" | "lose"): Run {
+  const kind = run.runKind ? runKindById(run.runKind) : null;
+  const delta = outcome === "win" ? (kind?.winGold ?? 0) : -(kind?.loseGold ?? 0);
+  const cash = Math.max(0, run.cash + delta);
+  const next = { ...run, cash };
+  if (outcome === "win" && kind) {
+    return openPrize(next, kind.prize);
+  }
+  return { ...next, screen: { kind: "end", outcome, goldDelta: delta } };
+}
+
+function openPrize(run: Run, prize: "chassis" | "upgrade"): Run {
+  if (prize === "upgrade") {
+    return { ...run, screen: { kind: "runPrize", prize: "upgrade" } };
+  }
+  const rolled = withRng(run);
+  const offers = pickDistinct(rolled.rng, chassisParts(), 2).map((part) => part.id);
+  if (offers.length !== 2) {
+    throw new Error("chassis prize needs 2 parts");
+  }
+  return {
+    ...rolled.run,
+    screen: { kind: "runPrize", prize: "chassis", offers: [offers[0]!, offers[1]!] },
+  };
+}
+
+function takePrizePart(run: Run, partId: PartId): Run {
+  if (run.screen.kind !== "runPrize" || run.screen.prize !== "chassis") {
+    return run;
+  }
+  if (!run.screen.offers.includes(partId)) {
+    return run;
+  }
+  return { ...addPart(run, partId), screen: { kind: "selectRun" } };
+}
+
+function takePrizeUpgrade(run: Run, instanceId: Run["bag"][number]["instanceId"]): Run {
+  if (run.screen.kind !== "runPrize" || run.screen.prize !== "upgrade") {
+    return run;
+  }
+  const bag = run.bag.map((item) =>
+    item.instanceId === instanceId ? { ...item, plus: item.plus + 1 } : item,
+  );
+  if (!bag.some((item, index) => item !== run.bag[index])) {
+    return run;
+  }
+  return { ...run, bag, screen: { kind: "selectRun" } };
 }
 
 function takeReward(run: Run, partId: PartId): Run {
@@ -330,4 +425,3 @@ function withRng(run: Run): { run: Run; rng: () => number } {
     rng: createRng(run.seed + 7919 + run.rolls),
   };
 }
-
