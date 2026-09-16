@@ -25,6 +25,7 @@ import {
   partyWeight,
   roleLabel,
   slotOfPart,
+  spareBag,
   teamStats,
 } from "./loadout";
 import { nodeById } from "./map";
@@ -286,22 +287,16 @@ function kitView(run: Run, selected: BotId | null): string {
     })
     .join("");
 
-  const bag = run.bag
+  const bag = spareBag(run)
     .map((item) => {
       const part = effectivePart(partById(item.partId), item.plus);
       const bot = selected ? run.bots.find((itemBot) => itemBot.id === selected) : undefined;
-      const worn = run.bots.some(
-        (itemBot) =>
-          itemBot.chassis === item.instanceId ||
-          itemBot.plate === item.instanceId ||
-          itemBot.tool === item.instanceId,
-      );
       const ok = !!bot && canEquip(run, bot, item);
       return partBlock(part, item.plus, {
         act: "equip",
         id: item.instanceId,
-        label: worn ? "Worn" : ok ? `Equip ${botLabel(run.bots, bot!)}` : "Cannot",
-        disabled: worn || !ok,
+        label: ok ? `Equip ${botLabel(run.bots, bot!)}` : "Cannot",
+        disabled: !ok,
       });
     })
     .join("");
@@ -317,7 +312,7 @@ function kitView(run: Run, selected: BotId | null): string {
       <p class="tip">Select a bot, then equip. Chassis sets carry. Plate and tool must fit that carry. Tools match the bot's role. Party weight is ${partyWeight(run)}.</p>
       <div class="bots">${bots}</div>
       <h2>Bag</h2>
-      <div class="grid">${bag}</div>
+      <div class="grid">${bag || `<p class="muted">Empty. Rewards and the shop fill this.</p>`}</div>
       <div class="row">${action}</div>
     </section>`;
 }

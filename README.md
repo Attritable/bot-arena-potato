@@ -28,7 +28,7 @@ GitHub Pages is not wired. The build uses a relative `base`, so you can drop `di
 ## Play
 
 1. Start a run. The party is Defender, Striker, Leader, Controller, and a second Striker.
-2. Kit on the map before you pick a room. Chassis sets how much plate and tool weight that bot can carry. A heavier chassis carries more and weighs more itself.
+2. Kit on the map before you pick a room. Starters start on the bots. The bag is empty until a reward or shop part lands there. Chassis sets how much plate and tool weight that bot can carry. A heavier chassis carries more and weighs more itself.
 3. Pick a room. Left rooms want a light party (`≤` gate). Right rooms want a heavy party (`≥` gate). Open rooms take any weight. A room you cannot reach from your last pick stays dark. A room whose gate you miss stays disabled until you re-kit.
 4. On a fight, resolve. Combat runs without micro. The log shows HP, damage, and heal.
 5. Take a part and cash, then return to the map. The boss ends the run.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asInstanceId, asNodeId, asPartId } from "./domain";
-import { botKit, canEquip, partyWeight, teamStats } from "./loadout";
+import { botKit, canEquip, partyWeight, spareBag, teamStats } from "./loadout";
 import { reachableFrom } from "./map";
 import { applyCommand, availableNodes, openNodes, startRun } from "./run";
 
@@ -17,6 +17,7 @@ describe("applyCommand", () => {
       "striker",
     ]);
     expect(run.bag).toHaveLength(15);
+    expect(spareBag(run)).toEqual([]);
     expect(partyWeight(run)).toBe(25);
     for (const bot of run.bots) {
       const kit = botKit(run, bot);

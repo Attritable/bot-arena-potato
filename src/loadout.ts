@@ -171,6 +171,11 @@ export function equippedInstanceIds(run: Run): Set<PartInstance["instanceId"]> {
   return ids;
 }
 
+export function spareBag(run: Run): PartInstance[] {
+  const worn = equippedInstanceIds(run);
+  return run.bag.filter((item) => !worn.has(item.instanceId));
+}
+
 export function slotOfPart(part: Part): Slot {
   return part.kind;
 }
