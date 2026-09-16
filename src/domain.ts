@@ -2,12 +2,15 @@ export type Role = "controller" | "defender" | "striker" | "leader";
 
 export type NodeKind = "fight" | "elite" | "rest" | "shop" | "boss";
 
-export type CardId = string & { readonly __brand: "CardId" };
+export type Slot = "chassis" | "plate" | "tool";
+
+export type PartId = string & { readonly __brand: "PartId" };
 export type NodeId = string & { readonly __brand: "NodeId" };
 export type InstanceId = string & { readonly __brand: "InstanceId" };
+export type BotId = string & { readonly __brand: "BotId" };
 
-export function asCardId(id: string): CardId {
-  return id as CardId;
+export function asPartId(id: string): PartId {
+  return id as PartId;
 }
 
 export function asNodeId(id: string): NodeId {
@@ -18,22 +21,63 @@ export function asInstanceId(id: string): InstanceId {
   return id as InstanceId;
 }
 
-export type PartCard = {
-  id: CardId;
+export function asBotId(id: string): BotId {
+  return id as BotId;
+}
+
+export type WeightGate =
+  | { kind: "any" }
+  | { kind: "max"; weight: number }
+  | { kind: "min"; weight: number };
+
+export type ToolEffect =
+  | { family: "suppress"; amount: number; stun: boolean }
+  | { family: "brace"; armor: number; guard: number }
+  | { family: "strike"; atk: number; burst: number }
+  | { family: "mend"; heal: number; rally: number };
+
+export type ChassisPart = {
+  id: PartId;
+  kind: "chassis";
+  name: string;
+  weight: number;
+  capacity: number;
+  cost: number;
+};
+
+export type PlatePart = {
+  id: PartId;
+  kind: "plate";
+  name: string;
+  weight: number;
+  armor: number;
+  cost: number;
+};
+
+export type ToolPart = {
+  id: PartId;
+  kind: "tool";
   name: string;
   role: Role;
   weight: number;
   cost: number;
-  atk: number;
-  armor: number;
-  heal: number;
-  control: number;
+  effect: ToolEffect;
 };
 
-export type CardInstance = {
+export type Part = ChassisPart | PlatePart | ToolPart;
+
+export type PartInstance = {
   instanceId: InstanceId;
-  cardId: CardId;
+  partId: PartId;
   plus: number;
+};
+
+export type Bot = {
+  id: BotId;
+  role: Role;
+  chassis: InstanceId | null;
+  plate: InstanceId | null;
+  tool: InstanceId | null;
 };
 
 export type MapNode = {
@@ -41,6 +85,7 @@ export type MapNode = {
   floor: number;
   slot: number;
   kind: NodeKind;
+  gate: WeightGate;
   next: NodeId[];
 };
 
@@ -76,14 +121,13 @@ export type CombatReport = {
 export type Screen =
   | { kind: "title" }
   | { kind: "map" }
+  | { kind: "kit" }
   | { kind: "loadout"; nodeId: NodeId }
   | { kind: "combat"; nodeId: NodeId; report: CombatReport }
-  | { kind: "reward"; cash: number; offers: [CardId, CardId, CardId] }
+  | { kind: "reward"; cash: number; offers: [PartId, PartId, PartId] }
   | { kind: "rest" }
-  | { kind: "shop"; stock: PartCard[] }
+  | { kind: "shop"; stock: Part[] }
   | { kind: "end"; outcome: "win" | "lose" };
-
-export type Equipped = Record<Role, InstanceId | null>;
 
 export type Run = {
   seed: number;
@@ -91,9 +135,8 @@ export type Run = {
   hp: number;
   maxHp: number;
   cash: number;
-  weightLimit: number;
-  bag: CardInstance[];
-  equipped: Equipped;
+  bag: PartInstance[];
+  bots: Bot[];
   nextInstance: number;
   map: MapGraph;
   current: NodeId | null;
@@ -104,15 +147,17 @@ export type Run = {
 export type Command =
   | { kind: "start" }
   | { kind: "pickNode"; nodeId: NodeId }
-  | { kind: "equip"; instanceId: InstanceId }
-  | { kind: "unequip"; role: Role }
+  | { kind: "openKit" }
+  | { kind: "closeKit" }
+  | { kind: "equip"; botId: BotId; slot: Slot; instanceId: InstanceId }
+  | { kind: "unequip"; botId: BotId; slot: Slot }
   | { kind: "commitFight" }
   | { kind: "continueAfterCombat" }
-  | { kind: "takeReward"; cardId: CardId }
+  | { kind: "takeReward"; partId: PartId }
   | { kind: "skipReward" }
   | { kind: "restHeal" }
   | { kind: "restUpgrade"; instanceId: InstanceId }
-  | { kind: "buy"; cardId: CardId }
+  | { kind: "buy"; partId: PartId }
   | { kind: "leaveShop" }
   | { kind: "restart" };
 
@@ -122,6 +167,16 @@ export const ROLES: readonly Role[] = [
   "leader",
   "controller",
 ];
+
+export const PARTY_ROLES: readonly Role[] = [
+  "defender",
+  "striker",
+  "leader",
+  "controller",
+  "striker",
+];
+
+export const SLOTS: readonly Slot[] = ["chassis", "plate", "tool"];
 
 export const NODE_KINDS: readonly NodeKind[] = [
   "fight",
