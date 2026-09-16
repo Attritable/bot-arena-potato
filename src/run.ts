@@ -1,41 +1,68 @@
 import { BALANCE } from "./balance";
 import { resolveCombat } from "./combat";
-import { cardById, CARDS, enemyFor, STARTER_CARD_IDS } from "./content";
 import {
+  enemyFor,
+  PARTS,
+  partById,
+  STARTER_CHASSIS,
+  STARTER_PLATE,
+  STARTER_TOOL,
+} from "./content";
+import {
+  asBotId,
   asInstanceId,
-  type CardId,
+  PARTY_ROLES,
+  type Bot,
   type Command,
-  type Equipped,
   type NodeId,
+  type PartId,
   type Run,
+  type Slot,
 } from "./domain";
-import { teamStats, weightIfEquip } from "./loadout";
+import {
+  botById,
+  botKit,
+  canEquip,
+  meetsGate,
+  partyWeight,
+  slotOfPart,
+  teamStats,
+} from "./loadout";
 import { generateMap, nodeById } from "./map";
 import { createRng, pickDistinct } from "./rng";
 
 export function startRun(seed: number): Run {
   const map = generateMap(createRng(seed));
-  const bag = STARTER_CARD_IDS.map((cardId, index) => ({
-    instanceId: asInstanceId(`s${index}`),
-    cardId,
-    plus: 0,
-  }));
-  const equipped: Equipped = {
-    defender: bag[0]!.instanceId,
-    striker: bag[1]!.instanceId,
-    leader: bag[2]!.instanceId,
-    controller: bag[3]!.instanceId,
+  const bag: Run["bag"] = [];
+  const bots: Bot[] = [];
+  let nextInstance = 0;
+
+  const add = (partId: PartId) => {
+    const instanceId = asInstanceId(`s${nextInstance}`);
+    nextInstance += 1;
+    bag.push({ instanceId, partId, plus: 0 });
+    return instanceId;
   };
+
+  PARTY_ROLES.forEach((role, index) => {
+    bots.push({
+      id: asBotId(`b${index}`),
+      role,
+      chassis: add(STARTER_CHASSIS),
+      plate: add(STARTER_PLATE),
+      tool: add(STARTER_TOOL[role]),
+    });
+  });
+
   return {
     seed,
     rolls: 0,
     hp: BALANCE.startHp,
     maxHp: BALANCE.startHp,
     cash: BALANCE.startCash,
-    weightLimit: BALANCE.weightLimit,
     bag,
-    equipped,
-    nextInstance: bag.length,
+    bots,
+    nextInstance,
     map,
     current: null,
     visited: [],
@@ -51,16 +78,20 @@ export function applyCommand(run: Run, command: Command): Run {
       return startRun(run.seed + 1);
     case "pickNode":
       return pickNode(run, command.nodeId);
+    case "openKit":
+      return run.screen.kind === "map" ? { ...run, screen: { kind: "kit" } } : run;
+    case "closeKit":
+      return run.screen.kind === "kit" ? { ...run, screen: { kind: "map" } } : run;
     case "equip":
-      return equip(run, command.instanceId);
+      return equip(run, command.botId, command.slot, command.instanceId);
     case "unequip":
-      return unequip(run, command.role);
+      return unequip(run, command.botId, command.slot);
     case "commitFight":
       return commitFight(run);
     case "continueAfterCombat":
       return continueAfterCombat(run);
     case "takeReward":
-      return takeReward(run, command.cardId);
+      return takeReward(run, command.partId);
     case "skipReward":
       return run.screen.kind === "reward" ? { ...run, screen: { kind: "map" } } : run;
     case "restHeal":
@@ -68,7 +99,7 @@ export function applyCommand(run: Run, command: Command): Run {
     case "restUpgrade":
       return restUpgrade(run, command.instanceId);
     case "buy":
-      return buy(run, command.cardId);
+      return buy(run, command.partId);
     case "leaveShop":
       return run.screen.kind === "shop" ? { ...run, screen: { kind: "map" } } : run;
     default: {
@@ -85,11 +116,18 @@ export function availableNodes(run: Run): NodeId[] {
   return nodeById(run.map, run.current).next;
 }
 
+export function openNodes(run: Run): NodeId[] {
+  const weight = partyWeight(run);
+  return availableNodes(run).filter((id) =>
+    meetsGate(weight, nodeById(run.map, id).gate),
+  );
+}
+
 function pickNode(run: Run, nodeId: NodeId): Run {
   if (run.screen.kind !== "map") {
     return run;
   }
-  if (!availableNodes(run).includes(nodeId)) {
+  if (!openNodes(run).includes(nodeId)) {
     return run;
   }
   const node = nodeById(run.map, nodeId);
@@ -103,39 +141,67 @@ function pickNode(run: Run, nodeId: NodeId): Run {
   }
   if (node.kind === "shop") {
     const rolled = withRng(next);
-    const stock = pickDistinct(rolled.rng, CARDS, 3);
+    const stock = pickDistinct(rolled.rng, PARTS, 3);
     return { ...rolled.run, screen: { kind: "shop", stock } };
   }
   return { ...next, screen: { kind: "loadout", nodeId } };
 }
 
-function equip(run: Run, instanceId: Run["bag"][number]["instanceId"]): Run {
-  if (run.screen.kind !== "loadout") {
+function kitScreen(run: Run): boolean {
+  return run.screen.kind === "kit" || run.screen.kind === "loadout";
+}
+
+function equip(
+  run: Run,
+  botId: Bot["id"],
+  slot: Slot,
+  instanceId: Run["bag"][number]["instanceId"],
+): Run {
+  if (!kitScreen(run)) {
     return run;
   }
   const instance = run.bag.find((item) => item.instanceId === instanceId);
   if (!instance) {
     return run;
   }
-  if (weightIfEquip(run, instance) > run.weightLimit) {
+  if (slotOfPart(partById(instance.partId)) !== slot) {
     return run;
   }
-  const card = cardById(instance.cardId);
+  const bot = botById(run, botId);
+  if (!canEquip(run, bot, instance)) {
+    return run;
+  }
   return {
     ...run,
-    equipped: { ...run.equipped, [card.role]: instance.instanceId },
+    bots: run.bots.map((item) =>
+      item.id === botId ? { ...item, [slot]: instance.instanceId } : item,
+    ),
   };
 }
 
-function unequip(run: Run, role: keyof Equipped): Run {
-  if (run.screen.kind !== "loadout") {
+function unequip(run: Run, botId: Bot["id"], slot: Slot): Run {
+  if (!kitScreen(run)) {
     return run;
   }
-  return { ...run, equipped: { ...run.equipped, [role]: null } };
+  return {
+    ...run,
+    bots: run.bots.map((item) => {
+      if (item.id !== botId) {
+        return item;
+      }
+      if (slot === "chassis") {
+        return { ...item, chassis: null, plate: null, tool: null };
+      }
+      return { ...item, [slot]: null };
+    }),
+  };
 }
 
 function commitFight(run: Run): Run {
   if (run.screen.kind !== "loadout") {
+    return run;
+  }
+  if (run.bots.some((bot) => botKit(run, bot).carry > botKit(run, bot).capacity)) {
     return run;
   }
   const node = nodeById(run.map, run.screen.nodeId);
@@ -148,7 +214,10 @@ function commitFight(run: Run): Run {
     atk: stats.atk,
     armor: stats.armor,
     heal: stats.heal,
-    control: stats.control,
+    suppress: stats.suppress,
+    stun: stats.stun,
+    guard: stats.guard,
+    burst: stats.burst,
     enemy,
   });
   return {
@@ -171,9 +240,9 @@ function continueAfterCombat(run: Run): Run {
   }
   const cash = node.kind === "elite" ? BALANCE.eliteCash : BALANCE.fightCash;
   const rolled = withRng(run);
-  const offers = pickDistinct(rolled.rng, CARDS, 3).map((card) => card.id);
+  const offers = pickDistinct(rolled.rng, PARTS, 3).map((part) => part.id);
   if (offers.length !== 3) {
-    throw new Error("reward needs 3 cards");
+    throw new Error("reward needs 3 parts");
   }
   return {
     ...rolled.run,
@@ -186,14 +255,14 @@ function continueAfterCombat(run: Run): Run {
   };
 }
 
-function takeReward(run: Run, cardId: CardId): Run {
+function takeReward(run: Run, partId: PartId): Run {
   if (run.screen.kind !== "reward") {
     return run;
   }
-  if (!run.screen.offers.includes(cardId)) {
+  if (!run.screen.offers.includes(partId)) {
     return run;
   }
-  return { ...addCard(run, cardId), screen: { kind: "map" } };
+  return { ...addPart(run, partId), screen: { kind: "map" } };
 }
 
 function restHeal(run: Run): Run {
@@ -220,27 +289,27 @@ function restUpgrade(run: Run, instanceId: Run["bag"][number]["instanceId"]): Ru
   return { ...run, bag, screen: { kind: "map" } };
 }
 
-function buy(run: Run, cardId: CardId): Run {
+function buy(run: Run, partId: PartId): Run {
   if (run.screen.kind !== "shop") {
     return run;
   }
-  const card = run.screen.stock.find((item) => item.id === cardId);
-  if (!card || run.cash < card.cost) {
+  const part = run.screen.stock.find((item) => item.id === partId);
+  if (!part || run.cash < part.cost) {
     return run;
   }
-  const next = addCard(run, cardId);
+  const next = addPart(run, partId);
   return {
     ...next,
-    cash: next.cash - card.cost,
+    cash: next.cash - part.cost,
     screen: {
       kind: "shop",
-      stock: run.screen.stock.filter((item) => item.id !== cardId),
+      stock: run.screen.stock.filter((item) => item.id !== partId),
     },
   };
 }
 
-function addCard(run: Run, cardId: CardId): Run {
-  cardById(cardId);
+function addPart(run: Run, partId: PartId): Run {
+  partById(partId);
   return {
     ...run,
     nextInstance: run.nextInstance + 1,
@@ -248,7 +317,7 @@ function addCard(run: Run, cardId: CardId): Run {
       ...run.bag,
       {
         instanceId: asInstanceId(`i${run.nextInstance}`),
-        cardId,
+        partId,
         plus: 0,
       },
     ],
@@ -261,3 +330,4 @@ function withRng(run: Run): { run: Run; rng: () => number } {
     rng: createRng(run.seed + 7919 + run.rolls),
   };
 }
+

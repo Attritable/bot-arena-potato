@@ -1,10 +1,23 @@
+import { BALANCE } from "./balance";
 import {
   asNodeId,
   type MapGraph,
   type MapNode,
   type NodeKind,
+  type WeightGate,
 } from "./domain";
 import { pickIndex } from "./rng";
+
+const FLOOR_SIZES = [0, 3, 4, 4, 3, 3, 1] as const;
+
+const LINKS: readonly (readonly (readonly number[])[])[] = [
+  [],
+  [[0, 1], [1, 2], [2]],
+  [[0, 1], [1, 2], [2, 3], [3]],
+  [[0], [0, 1], [1, 2], [2]],
+  [[0, 1], [1], [1, 2]],
+  [[0], [0], [0]],
+];
 
 const MID_KINDS: readonly NodeKind[] = ["fight", "elite", "rest", "shop"];
 
@@ -12,40 +25,60 @@ export function generateMap(rng: () => number): MapGraph {
   const nodes: MapNode[] = [];
   const floors: MapNode[][] = [];
 
-  const add = (floor: number, slot: number, kind: NodeKind): MapNode => {
+  const add = (floor: number, slot: number, kind: NodeKind, gate: WeightGate): MapNode => {
     const node: MapNode = {
       id: asNodeId(`f${floor}s${slot}`),
       floor,
       slot,
       kind,
+      gate,
       next: [],
     };
     nodes.push(node);
     return node;
   };
 
-  floors[1] = [add(1, 0, "fight")];
-  for (let floor = 2; floor <= 6; floor += 1) {
-    const pair = pickTwoKinds(rng, floor);
-    floors[floor] = [add(floor, 0, pair[0]), add(floor, 1, pair[1])];
-  }
-  floors[7] = [add(7, 0, "shop"), add(7, 1, "elite")];
-  floors[8] = [add(8, 0, "rest")];
-  floors[9] = [add(9, 0, "boss")];
+  floors[1] = [
+    add(1, 0, "fight", { kind: "max", weight: BALANCE.lightMax }),
+    add(1, 1, "fight", { kind: "any" }),
+    add(1, 2, "fight", { kind: "min", weight: BALANCE.floor1HeavyMin }),
+  ];
 
-  for (let floor = 1; floor <= 8; floor += 1) {
+  for (let floor = 2; floor <= 5; floor += 1) {
+    const size = FLOOR_SIZES[floor];
+    if (size === undefined) {
+      throw new Error("map floor size missing");
+    }
+    const kinds = pickUniqueKinds(rng, size, floor);
+    floors[floor] = kinds.map((kind, slot) => add(floor, slot, kind, gateFor(floor, slot, kind)));
+  }
+
+  floors[6] = [add(6, 0, "boss", { kind: "any" })];
+
+  for (let floor = 1; floor <= 5; floor += 1) {
     const here = floors[floor];
     const nxt = floors[floor + 1];
-    if (!here || !nxt) {
+    const links = LINKS[floor];
+    if (!here || !nxt || !links) {
       throw new Error("map floors missing");
     }
-    for (const node of here) {
-      node.next = nxt.map((item) => item.id);
-    }
+    here.forEach((node, slot) => {
+      const targets = links[slot];
+      if (!targets) {
+        throw new Error("map link missing");
+      }
+      node.next = targets.map((nextSlot) => {
+        const dest = nxt[nextSlot];
+        if (!dest) {
+          throw new Error("map link target missing");
+        }
+        return dest.id;
+      });
+    });
   }
 
   const first = floors[1];
-  const last = floors[9];
+  const last = floors[6];
   if (!first || !last || !last[0]) {
     throw new Error("map anchors missing");
   }
@@ -65,25 +98,46 @@ export function nodeById(map: MapGraph, id: ReturnType<typeof asNodeId>): MapNod
   return node;
 }
 
-export function siblingsUnique(map: MapGraph): boolean {
-  const byFloor = new Map<number, NodeKind[]>();
-  for (const node of map.nodes) {
-    const list = byFloor.get(node.floor) ?? [];
-    list.push(node.kind);
-    byFloor.set(node.floor, list);
-  }
-  for (const kinds of byFloor.values()) {
-    if (new Set(kinds).size !== kinds.length) {
-      return false;
+export function reachableFrom(map: MapGraph, start: MapNode["id"][]): Set<MapNode["id"]> {
+  const seen = new Set<MapNode["id"]>();
+  const queue = [...start];
+  while (queue.length > 0) {
+    const id = queue.pop();
+    if (!id || seen.has(id)) {
+      continue;
     }
+    seen.add(id);
+    queue.push(...nodeById(map, id).next);
   }
-  return true;
+  return seen;
 }
 
-function pickTwoKinds(rng: () => number, floor: number): [NodeKind, NodeKind] {
+function gateFor(floor: number, slot: number, kind: NodeKind): WeightGate {
+  if (kind === "rest" || kind === "boss") {
+    return { kind: "any" };
+  }
+  if (slot === 0) {
+    return { kind: "max", weight: BALANCE.lightMax };
+  }
+  if (slot >= 2) {
+    return {
+      kind: "min",
+      weight: floor >= 4 ? BALANCE.lateHeavyMin : BALANCE.heavyMin,
+    };
+  }
+  return { kind: "any" };
+}
+
+function pickUniqueKinds(rng: () => number, count: number, floor: number): NodeKind[] {
   const pool = MID_KINDS.filter((kind) => floor >= 3 || kind !== "elite");
-  const first = pool[pickIndex(rng, pool.length)]!;
-  const rest = pool.filter((kind) => kind !== first);
-  const second = rest[pickIndex(rng, rest.length)]!;
-  return [first, second];
+  const picked: NodeKind[] = [];
+  const remain = [...pool];
+  while (picked.length < count && remain.length > 0) {
+    const i = pickIndex(rng, remain.length);
+    picked.push(remain.splice(i, 1)[0]!);
+  }
+  while (picked.length < count) {
+    picked.push("fight");
+  }
+  return picked;
 }
