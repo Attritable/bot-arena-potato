@@ -1,0 +1,15 @@
+export const BALANCE = {
+  startHp: 20,
+  startCash: 8,
+  weightLimit: 12,
+  restHeal: 10,
+  maxRounds: 12,
+  fightCash: 4,
+  eliteCash: 8,
+  fightHp: [10, 14] as const,
+  fightAtk: [4, 3] as const,
+  eliteHp: [18, 22] as const,
+  eliteAtk: [6, 5] as const,
+  bossHp: 28,
+  bossAtk: 7,
+} as const;
